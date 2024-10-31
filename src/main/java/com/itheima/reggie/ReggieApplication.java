@@ -13,6 +13,6 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 public class ReggieApplication {
     public static void main(String[] args) {
         SpringApplication.run(ReggieApplication.class, args);
-        log.info("项目启动成功2024/10/31 20:46");
+        log.info("项目启动成功");
     }
 }
