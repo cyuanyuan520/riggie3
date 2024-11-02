@@ -14,10 +14,12 @@ import com.itheima.reggie.service.DishService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -35,11 +37,20 @@ public class DishController {
     private CategoryService categoryService;
     @Autowired
     private DishFlavorService flavorService;
+    @Autowired
+    private RedisTemplate redisTemplate;
 
     @PostMapping
     public R<String> save(@RequestBody DishDto dishDto) {
         log.info("菜品添加{}", dishDto);
         dishService.saveWithFlavor(dishDto);
+
+        //动态构造key
+        String key = "dish_" + dishDto.getCategoryId() + "_1";
+        //删除该key
+        redisTemplate.delete(key);
+        log.info("redis: " + key + "已被删除...");
+
         return R.success("菜品添加成功...");
     }
 
@@ -103,6 +114,11 @@ public class DishController {
      */
     @PutMapping
     public R<String> edit(@RequestBody DishDto dto) {
+        //动态构造key
+        String key = "dish_" + dto.getCategoryId() + "_1";
+        //删除该key
+        redisTemplate.delete(key);
+        log.info(key + "已被删除...");
         dishService.updateWithFlavor(dto);
         return R.success("修改成功!");
     }
@@ -115,8 +131,19 @@ public class DishController {
      */
     @GetMapping("list")
     public R<List<DishDto>> getByCategoryId(Dish dish) {
+        List<DishDto> dishDtoList = null;//提前建立好了要返回的对象空框架
         //分两个分支(因为可能有两种情况/有时候可能传入的没有菜品名)
         if (dish.getCategoryId() != null) {//id不为空, 所以是按照分类来查询的
+            //动态构造key
+            String key = "dish_" + dish.getCategoryId() + "_" + dish.getStatus();
+            //尝试从redis获取数据
+            dishDtoList = (List<DishDto>) redisTemplate.opsForValue().get(key);
+            if (dishDtoList != null) {
+                //如果存在则直接返回 无需查询数据库
+                log.info("本次菜品列表查询由redis托管");
+                return R.success(dishDtoList);
+            }
+            //redis中没有数据:
             LambdaQueryWrapper<Dish> wrapper = new LambdaQueryWrapper<>();
             wrapper.eq(Dish::getCategoryId, dish.getCategoryId());
             wrapper.eq(Dish::getStatus, 1);//确保查询出来的都是起售了的套餐
@@ -137,6 +164,8 @@ public class DishController {
                     item.setFlavors(flavorList);
                 }
             });
+            //redis中数据不存在: 将数据存入redis
+            redisTemplate.opsForValue().set(key, dtoList, 60L, TimeUnit.MINUTES);
             return R.success(dtoList);
         }
         //现在是第二个分支(根据菜品名字查询)
