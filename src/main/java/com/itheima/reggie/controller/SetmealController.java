@@ -15,6 +15,8 @@ import com.itheima.reggie.service.SetmealService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -38,6 +40,7 @@ public class SetmealController {
      * @return
      */
     @PostMapping
+    @CacheEvict(value = "setmealCache", allEntries = true)
     public R<String> saveNewSetmeal(@RequestBody SetmealDto setmealDto) {
         setmealService.saveNewSetmeal(setmealDto);
         return R.success("套餐添加成功");
@@ -56,19 +59,33 @@ public class SetmealController {
         return R.success(pageInfo);
     }
 
+    /**
+     * 删除套餐数据
+     * @param ids
+     * @return
+     */
     @DeleteMapping
+    @CacheEvict(value = "setmealCache", allEntries = true)
     public R<String> deleteSet(@RequestParam List<Long> ids) {
         setmealService.deleteSet(ids);
         return R.success("删除成功");
     }
 
 
+    /**
+     * 客户端显示套餐列表
+     * 已经被redis接管
+     * @param setmeal
+     * @return
+     */
     @GetMapping("/list")
+    @Cacheable(value = "setmealCache", key = "#setmeal.categoryId + '_' + #setmeal.status")
     public R<List<SetmealDto>> getSetmealWithDishes(Setmeal setmeal) {
         //先获取需要查询setmeal的分类id
         Long categoryId = setmeal.getCategoryId();
         LambdaQueryWrapper<Setmeal> setmealWrapper = new LambdaQueryWrapper<>();
         setmealWrapper.eq(Setmeal::getCategoryId, categoryId);
+        setmealWrapper.eq(Setmeal::getStatus, setmeal.getStatus());
         List<Setmeal> list = setmealService.list(setmealWrapper);
         List<SetmealDto> dtoList = list.stream().map((item) -> {
             SetmealDto dto = new SetmealDto();
@@ -80,9 +97,15 @@ public class SetmealController {
             dto.setSetmealDishes(dishes);
             return dto;
         }).collect(Collectors.toList());
+        log.info("本次请求没有被redis缓存");
         return R.success(dtoList);
     }
 
+    /**
+     * 显示套餐详情(一个套餐中有多少种菜 每种菜有多少粪)
+     * @param id
+     * @return
+     */
     @GetMapping("/dish/{id}")
     public R<List<DishDto>> getDishes(@PathVariable Long id) {
         LambdaQueryWrapper<SetmealDish> dishWrapper = new LambdaQueryWrapper<>();
